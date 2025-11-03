@@ -169,4 +169,28 @@ Organização do Repositório
 ├── requirements.txt
 └── README.md
 
+```mermaid
+flowchart TD
+    %% --- ESTILO ---
+    classDef bronze fill:#c57f27,stroke:#333,stroke-width:1px,color:#fff,font-weight:bold;
+    classDef silver fill:#6b7280,stroke:#333,stroke-width:1px,color:#fff,font-weight:bold;
+    classDef optional fill:#94a3b8,stroke:#333,stroke-width:1px,color:#fff;
+    classDef orchestrator fill:#047857,stroke:#333,stroke-width:1px,color:#fff,font-weight:bold;
+
+    %% --- FLUXO PRINCIPAL ---
+    A[1️⃣ ingest_dbloja.py<br/>(Bronze – PostgreSQL)]:::bronze --> 
+    B[2️⃣ upload_jsons_to_minio.py<br/>(Bronze – JSON)]:::bronze -->
+    C[3️⃣ ingest_ibge_brasilapi_to_minio.py<br/>(Bronze – API)]:::bronze -->
+    D{💾 Banco real disponível?}
+
+    D -->|Sim| E[4️⃣ controle_produto.py<br/>(Bronze – Incremental)]:::bronze
+    D -->|Não| F[5️⃣ listar_bronze_minio.py<br/>(Verificação opcional)]:::optional
+
+    E --> G[6️⃣ new_script_silver.py<br/>(Silver – db_loja)]:::silver
+    F --> G
+    G --> H[7️⃣ new_script_silver_json.py<br/>(Silver – JSON)]:::silver
+    H --> I[8️⃣ new_script_silver_ibge_final.py<br/>(Silver – API)]:::silver
+
+    %% --- ORQUESTRADOR ---
+    A -.-> Z[⚙️ orchestrator_pipeline.py<br/>(Executa toda a pipeline)]:::orchestrator
 
