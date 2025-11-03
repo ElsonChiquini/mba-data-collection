@@ -1,0 +1,172 @@
+Projeto MBA Data Collection
+Ingestão e Processamento de Dados no MinIO (Camadas Bronze → Silver)
+
+1️⃣ Lógica da Solução
+
+A pipeline foi estruturada em duas camadas principais — Bronze e Silver — armazenadas no MinIO, simulando um Data Lake corporativo.
+
+A camada Bronze guarda os dados no formato mais próximo do original (raw).
+A camada Silver aplica o tratamento, normalização e tipagem dos dados, gerando arquivos Parquet prontos para análise.
+
+| Tipo           | Fonte                                                       | Descrição                                                                 |
+| -------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Banco de dados | PostgreSQL (`db_loja`)                                      | Tabelas transacionais simuladas (categorias, clientes, pedidos, produtos) |
+| Arquivos JSON  | `json/` local                                               | Dados aninhados de sistemas externos                                      |
+| API Pública    | [BrasilAPI - IBGE](https://brasilapi.com.br/api/ibge/uf/v1) | Lista de estados brasileiros (UFs)                                        |
+
+Etapas da Pipeline
+Camada Bronze (Raw)
+
+ingest_dbloja.py
+Extrai dados do schema db_loja e envia para o bucket data-ingest/bronze/dbloja/ em formato Parquet.
+As tabelas categorias_produto, cliente, pedido_cabecalho e pedido_itens são processadas em Full Load, enquanto produto usa ingestão incremental.
+
+controle_produto.py
+Implementa o controle de marca d’água (watermark).
+O script lê o arquivo watermark_produto.txt para saber a última data processada (data_atualizacao).
+Apenas registros com data_atualizacao maior que a última marca são ingeridos.
+Após a execução, o watermark é atualizado.
+
+Exemplo de controle:
+
+watermark_produto.txt
+2025-11-01T14:10:42
+
+
+upload_jsons_to_minio.py
+Copia os arquivos .json da pasta local para o MinIO com timestamp automático no nome:
+
+bronze/json/dados_pedidos_20251031_224217.json
+
+
+ingest_ibge_brasilapi_to_minio.py
+Faz o consumo da BrasilAPI (endpoint /ibge/uf/v1) e salva o retorno:
+
+bronze/api/ibge_uf/ibge_uf_data_20251031_224147.json
+
+
+listar_bronze_minio.py
+Lista todos os objetos armazenados na camada Bronze.
+
+Camada Silver (Trusted)
+
+new_script_silver.py
+Lê os Parquets da Bronze e escreve novos Parquets tratados na Silver.
+Para produto, é feito um Merge (Upsert) conforme id_produto, mantendo apenas registros mais recentes.
+
+new_script_silver_json.py
+Normaliza os arquivos JSON (explode arrays, trata colunas nulas, cria tabelas auxiliares):
+
+transacoes/
+pedidos_externos/
+pedidos_externos_itens/
+produtos_parceiros/
+tags_produtos/
+
+
+new_script_silver_ibge_final.py
+Lê o JSON da BrasilAPI e aplica schema fixo (id, sigla, nome).
+
+2️⃣ Decisões de Design
+| Decisão                      | Justificativa                                               |
+| ---------------------------- | ----------------------------------------------------------- |
+| **MinIO como Data Lake**     | Ambiente leve e compatível com AWS S3                       |
+| **Particionamento temporal** | Estrutura `data=YYYYMMDD/` garante histórico e incremental  |
+| **Parquet**                  | Otimiza leitura e compressão                                |
+| **Watermark local**          | Evita reprocessamento e mantém histórico incremental        |
+| **Merge (Upsert)**           | Atualiza registros sem duplicação                           |
+| **Scripts modulares**        | Execução isolada ou completa via `orchestrator_pipeline.py` |
+| **SDK MinIO**                | Facilita leitura e escrita diretas em buckets               |
+
+3️⃣ Execução dos Scripts
+🔧 Pré-requisitos
+
+Python 3.10+
+
+Servidor MinIO ativo (http://localhost:9000)
+
+Bucket data-ingest criado
+
+Instalar dependências:
+
+pip install -r requirements.txt
+
+Execução Passo a Passo
+1️⃣ Ingestão Bronze
+python script/ingest_dbloja.py
+python script/controle_produto.py   # opcional, se banco real estiver conectado
+python script/upload_jsons_to_minio.py
+python script/ingest_ibge_brasilapi_to_minio.py
+
+2️⃣ Diagnóstico
+python script/listar_bronze_minio.py
+
+3️⃣ Processamento Silver
+python script/new_script_silver.py
+python script/new_script_silver_json.py
+python script/new_script_silver_ibge_final.py
+
+4️⃣ Pipeline completa
+python script/orchestrator_pipeline.py
+
+4️⃣ Evidências — Estrutura Final no MinIO
+
+-------------------------------------------------------------
+🥉 Camada Bronze
+
+Estrutura geral da Bronze
+
+
+Subpasta json/ — arquivos extraídos
+
+
+Subpasta api/ibge_uf/ — dados da BrasilAPI
+
+
+Subpasta dbloja/data="data do upload"/ — dados Parquet
+
+
+Watermark salva após execução incremental
+
+🥈 Camada Silver
+
+Estrutura geral do Data Lake
+
+
+Camada Silver completa (/prata/)
+
+
+Subpasta ibge_uf
+
+
+Subpasta dbloja
+
+
+Subpasta json
+
+Autores:
+Cristina Alves
+Elson Chiquini
+Gabriel Carille
+
+Organização do Repositório
+
+📂 /mba-data-collection
+├── /script/
+│   ├── ingest_dbloja.py
+│   ├── controle_produto.py
+│   ├── upload_jsons_to_minio.py
+│   ├── ingest_ibge_brasilapi_to_minio.py
+│   ├── listar_bronze_minio.py
+│   ├── new_script_silver.py
+│   ├── new_script_silver_json.py
+│   ├── new_script_silver_ibge_final.py
+│   └── orchestrator_pipeline.py
+├── /json/
+│   └── arquivos .json usados como fonte
+├── /evidencias/
+│   └── imagens do console MinIO
+├── requirements.txt
+└── README.md
+
+
